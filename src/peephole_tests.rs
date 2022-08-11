@@ -4,12 +4,15 @@ use std::num::Wrapping;
 use pretty_assertions::assert_eq;
 use quickcheck::quickcheck;
 
-use crate::bfir::AstNode::*;
-use crate::bfir::{AstNode, Position};
 use crate::diagnostics::Warning;
-
-use crate::bfir::parse;
 use crate::peephole::*;
+use crate::{
+    bfir::{
+        parse,
+        AstNode::{self, *},
+    },
+    diagnostics::Position,
+};
 use quickcheck::{Arbitrary, Gen, TestResult};
 
 impl Arbitrary for AstNode {
@@ -223,7 +226,7 @@ fn should_combine_before_read() {
             position: Some(Position { start: 2, end: 2 }),
         },
     ];
-    assert_eq!(optimize(initial, &None).0, expected);
+    assert_eq!(optimize(initial, OptimisationsFlags::all()).0, expected);
 }
 
 #[test]
@@ -259,7 +262,7 @@ fn should_combine_before_read_nested() {
             position: Some(Position { start: 1, end: 4 }),
         },
     ];
-    assert_eq!(optimize(initial, &None).0, expected);
+    assert_eq!(optimize(initial, OptimisationsFlags::all()).0, expected);
 }
 
 #[test]
@@ -380,7 +383,7 @@ fn remove_repeated_loops() {
             position: Some(Position { start: 0, end: 0 }),
         },
     ];
-    assert_eq!(optimize(initial, &None).0, expected);
+    assert_eq!(optimize(initial, OptimisationsFlags::all()).0, expected);
 }
 
 #[test]
@@ -767,7 +770,14 @@ fn is_pure(instrs: &[AstNode]) -> bool {
 fn quickcheck_should_annotate_known_zero_at_start() {
     fn should_annotate_known_zero_at_start(instrs: Vec<AstNode>) -> bool {
         let annotated = annotate_known_zero(instrs);
-        matches!(annotated[0], Set { amount: Wrapping(0), offset: 0, .. })
+        matches!(
+            annotated[0],
+            Set {
+                amount: Wrapping(0),
+                offset: 0,
+                ..
+            }
+        )
     }
     quickcheck(should_annotate_known_zero_at_start as fn(Vec<AstNode>) -> bool);
 }
@@ -855,7 +865,10 @@ fn should_annotate_known_zero_cleaned_up() {
     let initial = vec![Write {
         position: Some(Position { start: 0, end: 0 }),
     }];
-    assert_eq!(optimize(initial.clone(), &None).0, initial);
+    assert_eq!(
+        optimize(initial.clone(), OptimisationsFlags::all()).0,
+        initial
+    );
 }
 
 #[test]
@@ -874,7 +887,10 @@ fn should_preserve_set_0_in_loop() {
             position: Some(Position { start: 0, end: 0 }),
         },
     ];
-    assert_eq!(optimize(initial.clone(), &None).0, initial);
+    assert_eq!(
+        optimize(initial.clone(), OptimisationsFlags::all()).0,
+        initial
+    );
 }
 
 #[test]
@@ -893,7 +909,7 @@ fn should_remove_pure_code() {
         },
     ];
 
-    let (result, warnings) = optimize(initial, &None);
+    let (result, warnings) = optimize(initial, OptimisationsFlags::all());
 
     assert_eq!(result, expected);
     assert_eq!(
@@ -911,7 +927,7 @@ fn quickcheck_should_remove_dead_pure_code() {
         if !is_pure(&instrs) {
             return TestResult::discard();
         }
-        TestResult::from_bool(optimize(instrs, &None).0 == vec![])
+        TestResult::from_bool(optimize(instrs, OptimisationsFlags::all()).0 == vec![])
     }
     quickcheck(should_remove_dead_pure_code as fn(Vec<AstNode>) -> TestResult);
 }
@@ -922,8 +938,8 @@ fn quickcheck_optimize_should_be_idempotent() {
         // Once we've optimized once, running again shouldn't reduce the
         // instructions further. If it does, we're probably running our
         // optimisations in the wrong order.
-        let minimal = optimize(instrs, &None).0;
-        optimize(minimal.clone(), &None).0 == minimal
+        let minimal = optimize(instrs, OptimisationsFlags::all()).0;
+        optimize(minimal.clone(), OptimisationsFlags::all()).0 == minimal
     }
     quickcheck(optimize_should_be_idempotent as fn(Vec<AstNode>) -> bool);
 }
@@ -984,7 +1000,7 @@ fn pathological_optimisation_opportunity() {
         },
     ];
 
-    assert_eq!(optimize(instrs, &None).0, expected);
+    assert_eq!(optimize(instrs, OptimisationsFlags::all()).0, expected);
 }
 
 fn count_instrs(instrs: &[AstNode]) -> u64 {
@@ -1003,7 +1019,7 @@ fn quickcheck_optimize_should_decrease_size() {
     fn optimize_should_decrease_size(instrs: Vec<AstNode>) -> bool {
         // The result of optimize() should never increase the number of
         // instructions.
-        let result = optimize(instrs.clone(), &None).0;
+        let result = optimize(instrs.clone(), OptimisationsFlags::all()).0;
         count_instrs(&result) <= count_instrs(&instrs)
     }
     quickcheck(optimize_should_decrease_size as fn(Vec<AstNode>) -> bool);
@@ -1326,7 +1342,7 @@ fn combine_increments_after_sort() {
             position: Some(Position { start: 6, end: 6 }),
         },
     ];
-    assert_eq!(optimize(instrs, &None).0, expected);
+    assert_eq!(optimize(instrs, OptimisationsFlags::all()).0, expected);
 }
 
 #[test]

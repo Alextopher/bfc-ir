@@ -5,66 +5,21 @@
 //! It also provides functions for generating ASTs from source code,
 //! producing good error messages on malformed inputs.
 
+use self::AstNode::*;
+use crate::diagnostics::Position;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::Wrapping;
 
 #[cfg(test)]
+use crate::diagnostics::Combine;
+#[cfg(test)]
 use pretty_assertions::assert_eq;
-
-use self::AstNode::*;
 
 /// A cell is the fundamental BF datatype that we work with. BF
 /// requires this to be at least one byte, we provide a cell of
 /// exactly one byte.
 pub type Cell = Wrapping<i8>;
-
-/// An inclusive range used for tracking positions in source code.
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub struct Position {
-    pub start: usize,
-    pub end: usize,
-}
-
-impl fmt::Debug for Position {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.start == self.end {
-            write!(f, "{}", self.start)
-        } else {
-            write!(f, "{}-{}", self.start, self.end)
-        }
-    }
-}
-
-pub trait Combine<T> {
-    fn combine(&self, _: T) -> T;
-}
-
-impl Combine<Option<Position>> for Option<Position> {
-    fn combine(&self, other: Self) -> Self {
-        match (*self, other) {
-            (Some(pos1), Some(pos2)) => {
-                let (first_pos, second_pos) = if pos1.start <= pos2.start {
-                    (pos1, pos2)
-                } else {
-                    (pos2, pos1)
-                };
-
-                // If they're adjacent positions, we can merge them.
-                if first_pos.end + 1 >= second_pos.start {
-                    Some(Position {
-                        start: first_pos.start,
-                        end: second_pos.end,
-                    })
-                } else {
-                    // Otherwise, just use the second position.
-                    Some(pos2)
-                }
-            }
-            _ => None,
-        }
-    }
-}
 
 /// `AstNode` represents a node in our BF AST.
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -88,8 +43,8 @@ pub enum AstNode {
         body: Vec<AstNode>,
         position: Option<Position>,
     },
-    // These instruction have no direct equivalent in BF, but we
-    // generate them during optimisation.
+    /// These instruction have no direct equivalent in BF, but we
+    /// generate them during optimisation.
     Set {
         amount: Cell,
         offset: isize,

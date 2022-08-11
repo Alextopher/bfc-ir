@@ -1,25 +1,51 @@
-//! Optimisations that replace parts of the BF AST with faster
-//! equivalents.
+//! Optimisations that replace parts of the BF AST with faster equivalents.
+
+use bitflags::bitflags;
+use itertools::Itertools;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::num::Wrapping;
 
-use itertools::Itertools;
-
-use crate::diagnostics::Warning;
-
 use crate::bfir::AstNode::*;
-use crate::bfir::{get_position, AstNode, Cell, Combine, Position};
+use crate::bfir::{get_position, AstNode, Cell};
+use crate::diagnostics::{Combine, Position, Warning};
 
 const MAX_OPT_ITERATIONS: u64 = 40;
 
+bitflags! {
+    /// Flags that control which optimisations are performed.
+    pub struct OptimisationsFlags: u64 {
+        /// Combine adjacent increments and decrements.
+        const COMBINE_INC = 1 << 0;
+        /// Combine adjacent pointer increments and decrements.
+        const COMBINE_PTR = 1 << 1;
+        /// Adds `Set 0` instructions when we know a cell is zero.
+        /// Such as immediately after a loop. Useful for further optimisations.
+        const KNOWN_ZERO = 1 << 2;
+        /// Transforms the common "Multiply-Move" pattern into a single instruction.
+        const MULTIPLY = 1 << 3;
+        /// `[-]` and `[+]` loops are replaced with `Set 0`.
+        const ZEROING_LOOP = 1 << 4;
+        /// Neighbouring `Set` and `Increment` instructions are combined.
+        const COMBINE_SET = 1 << 5;
+        /// Remove known dead loops.
+        const DEAD_LOOP_REMOVAL = 1 << 6;
+        /// Undos `KNOWN_ZERO` optimisations
+        const REDUNDANT_SET_REMOVAL = 1 << 7;
+        /// `Read` instructions clobber `Increment` and `Set` instructions.
+        const READ_CLOBBER = 1 << 8;
+        /// Remove code at the end of the program that has no side effects
+        const PURE_REMOVAL = 1 << 9;
+        /// Reorder flat sequences of instructions so we use offsets and only
+        /// have one pointer increment at the end.
+        const OFFSET_SORT = 1 << 10;
+    }
+}
+
 /// Given a sequence of BF instructions, apply peephole optimisations
 /// (repeatedly if necessary).
-pub fn optimize(
-    instrs: Vec<AstNode>,
-    pass_specification: &Option<String>,
-) -> (Vec<AstNode>, Vec<Warning>) {
+pub fn optimize(instrs: Vec<AstNode>, flags: OptimisationsFlags) -> (Vec<AstNode>, Vec<Warning>) {
     // Many of our individual peephole optimisations remove
     // instructions, creating new opportunities to combine. We run
     // until we've found a fixed-point where no further optimisations
@@ -27,7 +53,7 @@ pub fn optimize(
     let mut prev = instrs.clone();
     let mut warnings = vec![];
 
-    let (mut result, warning) = optimize_once(instrs, pass_specification);
+    let (mut result, warning) = optimize_once(instrs, flags);
 
     if let Some(warning) = warning {
         warnings.push(warning);
@@ -39,7 +65,7 @@ pub fn optimize(
         } else {
             prev = result.clone();
 
-            let (new_result, new_warning) = optimize_once(result, pass_specification);
+            let (new_result, new_warning) = optimize_once(result, flags);
 
             if let Some(warning) = new_warning {
                 warnings.push(warning);
@@ -60,47 +86,47 @@ pub fn optimize(
 /// Apply all our peephole optimisations once and return the result.
 fn optimize_once(
     instrs: Vec<AstNode>,
-    pass_specification: &Option<String>,
+    flags: OptimisationsFlags,
 ) -> (Vec<AstNode>, Option<Warning>) {
-    let pass_specification = pass_specification.clone().unwrap_or_else(|| {
-        "combine_inc,combine_ptr,known_zero,\
-         multiply,zeroing_loop,combine_set,\
-         dead_loop,redundant_set,read_clobber,\
-         pure_removal,offset_sort"
-            .to_owned()
-    });
-    let passes: Vec<_> = pass_specification.split(',').collect();
-
     let mut instrs = instrs;
 
-    if passes.contains(&"combine_inc") {
-        instrs = combine_increments(instrs);
+    if flags.contains(OptimisationsFlags::COMBINE_INC) {
+        instrs = combine_increments(instrs)
     }
-    if passes.contains(&"combine_ptr") {
+
+    if flags.contains(OptimisationsFlags::COMBINE_PTR) {
         instrs = combine_ptr_increments(instrs);
     }
-    if passes.contains(&"known_zero") {
+
+    if flags.contains(OptimisationsFlags::KNOWN_ZERO) {
         instrs = annotate_known_zero(instrs);
     }
-    if passes.contains(&"multiply") {
+
+    if flags.contains(OptimisationsFlags::MULTIPLY) {
         instrs = extract_multiply(instrs);
     }
-    if passes.contains(&"zeroing_loop") {
+
+    if flags.contains(OptimisationsFlags::ZEROING_LOOP) {
         instrs = zeroing_loops(instrs);
     }
-    if passes.contains(&"combine_set") {
+
+    if flags.contains(OptimisationsFlags::COMBINE_SET) {
         instrs = combine_set_and_increments(instrs);
     }
-    if passes.contains(&"dead_loop") {
+
+    if flags.contains(OptimisationsFlags::DEAD_LOOP_REMOVAL) {
         instrs = remove_dead_loops(instrs);
     }
-    if passes.contains(&"redundant_set") {
+
+    if flags.contains(OptimisationsFlags::REDUNDANT_SET_REMOVAL) {
         instrs = remove_redundant_sets(instrs);
     }
-    if passes.contains(&"read_clobber") {
+
+    if flags.contains(OptimisationsFlags::READ_CLOBBER) {
         instrs = remove_read_clobber(instrs);
     }
-    let warning = if passes.contains(&"pure_removal") {
+
+    let warning = if flags.contains(OptimisationsFlags::PURE_REMOVAL) {
         let (removed, pure_warning) = remove_pure_code(instrs);
         instrs = removed;
         pure_warning
@@ -108,7 +134,7 @@ fn optimize_once(
         None
     };
 
-    if passes.contains(&"offset_sort") {
+    if flags.contains(OptimisationsFlags::OFFSET_SORT) {
         instrs = sort_by_offset(instrs);
     }
 
@@ -314,7 +340,7 @@ pub fn remove_read_clobber(instrs: Vec<AstNode>) -> Vec<AstNode> {
 
                     // MultiplyMove instructions are not redundant,
                     // because they affect other cells too.
-                    if matches!(instrs[prev_modify_index], MultiplyMove { ..}) {
+                    if matches!(instrs[prev_modify_index], MultiplyMove { .. }) {
                         continue;
                     }
 
@@ -743,7 +769,7 @@ pub fn remove_pure_code(mut instrs: Vec<AstNode>) -> (Vec<AstNode>, Option<Warni
             .into_iter()
             .map(|instr| get_position(&instr))
             .filter(|pos| pos.is_some())
-            .fold1(|pos1, pos2| pos1.combine(pos2))
+            .reduce(|pos1, pos2| pos1.combine(pos2))
             .map(|pos| pos.unwrap());
         Some(Warning {
             message: "These instructions have no effect.".to_owned(),

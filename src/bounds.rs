@@ -3,22 +3,19 @@
 //! Calculate the maximum cell accessed by a BF program.
 
 #[cfg(test)]
+use crate::{bfir::parse, diagnostics::Position};
+#[cfg(test)]
 use pretty_assertions::assert_eq;
 #[cfg(test)]
 use quickcheck::quickcheck;
 #[cfg(test)]
-use std::collections::HashMap;
-#[cfg(test)]
-use std::num::Wrapping;
+use std::{collections::HashMap, num::Wrapping};
 
 use std::cmp::{max, Ord, Ordering};
 use std::ops::Add;
 
 use crate::bfir::AstNode;
 use crate::bfir::AstNode::*;
-
-#[cfg(test)]
-use crate::bfir::{parse, Position};
 
 // 100,000 cells, zero-indexed.
 pub const MAX_CELL_INDEX: usize = 99999;
@@ -131,15 +128,9 @@ fn movement(instr: &AstNode) -> (SaturatingInt, SaturatingInt) {
 
             match net_in_body {
                 SaturatingInt::Number(net_loop_movement) => {
-                    if net_loop_movement == 0 {
-                        (max_in_body, SaturatingInt::Number(0))
-                    } else if net_loop_movement < 0 {
-                        // Net movement was negative, so conservatively assume
-                        // it was zero (e.g. the loop may run zero times).
+                    if net_loop_movement <= 0 {
                         (max_in_body, SaturatingInt::Number(0))
                     } else {
-                        // Net loop movement was positive, so we can't
-                        // assume any bounds.
                         (SaturatingInt::Max, SaturatingInt::Max)
                     }
                 }

@@ -3,27 +3,21 @@
 //! Compile time execution of BF programs.
 
 #[cfg(test)]
-use std::collections::HashMap;
-use std::env;
-use std::num::Wrapping;
-
+use crate::{bfir::parse, bounds::MAX_CELL_INDEX, diagnostics::Position};
 #[cfg(test)]
 use pretty_assertions::assert_eq;
 #[cfg(test)]
 use quickcheck::quickcheck;
-
 #[cfg(test)]
-use crate::bfir::{parse, Position};
+use std::collections::HashMap;
 
-use crate::bfir::AstNode::*;
-use crate::bfir::{AstNode, Cell};
-
-use crate::diagnostics::Warning;
-
-#[cfg(test)]
-use crate::bounds::MAX_CELL_INDEX;
-
+use crate::bfir::{
+    AstNode::{self, *},
+    Cell,
+};
 use crate::bounds::highest_cell_index;
+use crate::diagnostics::Warning;
+use std::num::Wrapping;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionState<'a> {
@@ -53,8 +47,11 @@ pub enum Outcome {
     OutOfSteps,
 }
 
+#[cfg(test)]
 /// The maximum number of steps we should execute at compile time.
 pub fn max_steps() -> u64 {
+    use std::env;
+
     // It takes around 1 million steps to finish executing bottles.bf
     // at compile time. This is intolerably slow for debug builds of
     // bfc, but instant on a release build.
@@ -66,7 +63,7 @@ pub fn max_steps() -> u64 {
     steps
 }
 
-/// Compile time speculative execution of instructions. We return the
+/// Compile time speculative execution of instructions using an interpreter. We return the
 /// final state of the cells, any print side effects, and the point in
 /// the code we reached.
 pub fn execute(instrs: &[AstNode], steps: u64) -> (ExecutionState, Option<Warning>) {
@@ -165,10 +162,7 @@ pub fn execute_with_state<'a>(
                                 dest_ptr, *cell_offset, cell_ptr
                             );
 
-                            return Outcome::RuntimeError(Warning {
-                                message,
-                                position,
-                            });
+                            return Outcome::RuntimeError(Warning { message, position });
                         }
                         if dest_ptr as usize >= state.cells.len() {
                             state.start_instr = Some(&instrs[instr_idx]);
