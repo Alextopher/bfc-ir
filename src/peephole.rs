@@ -192,11 +192,19 @@ pub fn previous_cell_change(instrs: &[AstNode], index: usize) -> Option<usize> {
                     return Some(i);
                 }
             }
+            Loop { .. } => {
+                if needed_offset == 0 {
+                    return Some(i);
+                } else {
+                    // Inside the loop we don't know what's going on.
+                    return None;
+                }
+            }
             // No cells changed, so just keep working backwards.
             Write { .. } => {}
             // These instructions may have modified the cell, so
             // we return None for "I don't know".
-            Read { .. } | Loop { .. } => return None,
+            Read { .. } => return None,
         }
     }
     None
@@ -362,7 +370,7 @@ pub fn remove_read_clobber(instrs: Vec<AstNode>) -> Vec<AstNode> {
         .map_loops(remove_read_clobber)
 }
 
-/// Convert [-] to Set 0.
+/// Convert `[-]` and `[+]` to Set 0.
 pub fn zeroing_loops(instrs: Vec<AstNode>) -> Vec<AstNode> {
     instrs
         .into_iter()
@@ -372,6 +380,19 @@ pub fn zeroing_loops(instrs: Vec<AstNode>) -> Vec<AstNode> {
                 if body.len() == 1 {
                     if let Increment {
                         amount: Wrapping(-1),
+                        offset: 0,
+                        ..
+                    } = body[0]
+                    {
+                        return Set {
+                            amount: Wrapping(0),
+                            offset: 0,
+                            position,
+                        };
+                    }
+
+                    if let Increment {
+                        amount: Wrapping(1),
                         offset: 0,
                         ..
                     } = body[0]
@@ -631,10 +652,10 @@ pub fn combine_set_and_increments(instrs: Vec<AstNode>) -> Vec<AstNode> {
 }
 
 pub fn remove_redundant_sets(instrs: Vec<AstNode>) -> Vec<AstNode> {
-    let mut reduced = remove_redundant_sets_inner(instrs);
-
     // Remove a set zero at the beginning of the program, since cells
     // are initialised to zero anyway.
+    let mut reduced = remove_redundant_sets_inner(instrs);
+
     if let Some(&Set {
         amount: Wrapping(0),
         offset: 0,

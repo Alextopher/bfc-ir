@@ -1354,11 +1354,27 @@ fn prev_mutate_loop() {
             body: vec![],
             position: Some(Position { start: 0, end: 0 }),
         },
+        PointerIncrement {
+            amount: 1,
+            position: Some(Position { start: 0, end: 0 }),
+        },
         Read {
             position: Some(Position { start: 0, end: 0 }),
         },
     ];
-    assert_eq!(previous_cell_change(&instrs, 1), None);
+    assert_eq!(previous_cell_change(&instrs, 2), None);
+
+    // However if there are no moves between the loop and previous_cell_change we know the loop must have zerod the cell
+    let instrs = vec![
+        Loop {
+            body: vec![],
+            position: Some(Position { start: 0, end: 0 }),
+        },
+        Read {
+            position: Some(Position { start: 0, end: 0 }),
+        },
+    ];
+    assert_eq!(previous_cell_change(&instrs, 1), Some(0));
 }
 
 #[test]
