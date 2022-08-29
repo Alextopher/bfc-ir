@@ -192,19 +192,19 @@ pub fn previous_cell_change(instrs: &[AstNode], index: usize) -> Option<usize> {
                     return Some(i);
                 }
             }
-            Loop { .. } => {
-                if needed_offset == 0 {
-                    return Some(i);
-                } else {
-                    // Inside the loop we don't know what's going on.
-                    return None;
-                }
-            }
+            // Loop { .. } => {
+            //     if needed_offset == 0 {
+            //         return Some(i);
+            //     } else {
+            //         // Inside the loop we don't know what's going on.
+            //         return None;
+            //     }
+            // }
             // No cells changed, so just keep working backwards.
             Write { .. } => {}
             // These instructions may have modified the cell, so
             // we return None for "I don't know".
-            Read { .. } => return None,
+            Read { .. } | Loop { .. } => return None,
         }
     }
     None
