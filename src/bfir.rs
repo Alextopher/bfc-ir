@@ -5,12 +5,12 @@
 //! It also provides functions for generating ASTs from source code,
 //! producing good error messages on malformed inputs.
 
-use self::AstNode::*;
 use crate::diagnostics::Position;
 use crate::peephole::remove_redundant_sets;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Write;
 use std::num::Wrapping;
 
 #[cfg(test)]
@@ -64,7 +64,7 @@ fn fmt_with_indent(instr: &AstNode, indent: i32, f: &mut fmt::Formatter) {
     }
 
     match instr {
-        &Loop {
+        &AstNode::Loop {
             body: ref loop_body,
             position,
             ..
@@ -136,13 +136,13 @@ impl AstNode {
 
 pub fn get_position(instr: &AstNode) -> Option<Position> {
     match *instr {
-        Increment { position, .. } => position,
-        PointerIncrement { position, .. } => position,
-        Read { position } => position,
-        Write { position } => position,
-        Loop { position, .. } => position,
-        Set { position, .. } => position,
-        MultiplyMove { position, .. } => position,
+        AstNode::Increment { position, .. } => position,
+        AstNode::PointerIncrement { position, .. } => position,
+        AstNode::Read { position } => position,
+        AstNode::Write { position } => position,
+        AstNode::Loop { position, .. } => position,
+        AstNode::Set { position, .. } => position,
+        AstNode::MultiplyMove { position, .. } => position,
     }
 }
 
@@ -164,7 +164,7 @@ pub fn parse(source: &str) -> Result<Vec<AstNode>, ParseError> {
 
     for (index, c) in source.chars().enumerate() {
         match c {
-            '+' => instructions.push(Increment {
+            '+' => instructions.push(AstNode::Increment {
                 amount: Wrapping(1),
                 offset: 0,
                 position: Some(Position {
@@ -172,7 +172,7 @@ pub fn parse(source: &str) -> Result<Vec<AstNode>, ParseError> {
                     end: index,
                 }),
             }),
-            '-' => instructions.push(Increment {
+            '-' => instructions.push(AstNode::Increment {
                 amount: Wrapping(-1),
                 offset: 0,
                 position: Some(Position {
@@ -180,27 +180,27 @@ pub fn parse(source: &str) -> Result<Vec<AstNode>, ParseError> {
                     end: index,
                 }),
             }),
-            '>' => instructions.push(PointerIncrement {
+            '>' => instructions.push(AstNode::PointerIncrement {
                 amount: 1,
                 position: Some(Position {
                     start: index,
                     end: index,
                 }),
             }),
-            '<' => instructions.push(PointerIncrement {
+            '<' => instructions.push(AstNode::PointerIncrement {
                 amount: -1,
                 position: Some(Position {
                     start: index,
                     end: index,
                 }),
             }),
-            ',' => instructions.push(Read {
+            ',' => instructions.push(AstNode::Read {
                 position: Some(Position {
                     start: index,
                     end: index,
                 }),
             }),
-            '.' => instructions.push(Write {
+            '.' => instructions.push(AstNode::Write {
                 position: Some(Position {
                     start: index,
                     end: index,
@@ -212,7 +212,7 @@ pub fn parse(source: &str) -> Result<Vec<AstNode>, ParseError> {
             }
             ']' => {
                 if let Some((mut parent_instr, open_index)) = stack.pop() {
-                    parent_instr.push(Loop {
+                    parent_instr.push(AstNode::Loop {
                         body: instructions,
                         position: Some(Position {
                             start: open_index,
@@ -263,24 +263,24 @@ pub(crate) fn expand_sets(instrs: &[AstNode]) -> Vec<AstNode> {
     let mut result = vec![];
     for instr in instrs {
         match *instr {
-            Set {
+            AstNode::Set {
                 amount,
                 offset,
                 position,
             } => {
-                result.push(Set {
+                result.push(AstNode::Set {
                     amount: Wrapping(0),
                     offset,
                     position,
                 });
-                result.push(Increment {
+                result.push(AstNode::Increment {
                     amount,
                     offset,
                     position,
                 });
             }
-            Loop { ref body, position } => {
-                result.push(Loop {
+            AstNode::Loop { ref body, position } => {
+                result.push(AstNode::Loop {
                     body: expand_sets(body),
                     position,
                 });
@@ -297,7 +297,7 @@ fn decompile_inner(instructions: &[AstNode]) -> String {
     let mut last_offset = 0;
     for ir in instructions {
         match ir {
-            Increment { amount, offset, .. } => {
+            AstNode::Increment { amount, offset, .. } => {
                 let diff = offset - last_offset;
                 last_offset = *offset;
 
@@ -312,9 +312,9 @@ fn decompile_inner(instructions: &[AstNode]) -> String {
                     Ordering::Greater => "+".repeat(amount.0 as usize),
                 };
 
-                result.push_str(&format!("{}{}", moves, incs));
+                write!(result, "{}{}", moves, incs).unwrap();
             }
-            PointerIncrement { amount, .. } => {
+            AstNode::PointerIncrement { amount, .. } => {
                 let diff = amount - last_offset;
                 last_offset = 0;
 
@@ -326,18 +326,18 @@ fn decompile_inner(instructions: &[AstNode]) -> String {
 
                 result.push_str(&moves);
             }
-            Read { .. } => {
+            AstNode::Read { .. } => {
                 result.push(',');
             }
-            Write { .. } => {
+            AstNode::Write { .. } => {
                 result.push('.');
             }
-            Loop { body, .. } => {
+            AstNode::Loop { body, .. } => {
                 result.push('[');
                 result.push_str(&decompile(body));
                 result.push(']');
             }
-            Set { amount, offset, .. } => {
+            AstNode::Set { amount, offset, .. } => {
                 let diff = offset - last_offset;
                 last_offset = *offset;
 
@@ -352,9 +352,9 @@ fn decompile_inner(instructions: &[AstNode]) -> String {
                     Ordering::Greater => "+".repeat(amount.0 as usize),
                 };
 
-                result.push_str(&format!("{}[-]{}", moves, incs));
+                write!(result, "{}[-]{}", moves, incs).unwrap();
             }
-            MultiplyMove { changes, .. } => {
+            AstNode::MultiplyMove { changes, .. } => {
                 // Get changes sorted by offset
                 let mut changes = changes.iter().collect::<Vec<_>>();
                 changes.sort_by_key(|(offset, _)| *offset);
@@ -377,7 +377,7 @@ fn decompile_inner(instructions: &[AstNode]) -> String {
                         Ordering::Greater => "+".repeat(amount.0 as usize),
                     };
 
-                    result.push_str(&format!("{}{}", moves, incs));
+                    write!(result, "{}{}", moves, incs).unwrap();
                 }
 
                 let moves = match last_offset.cmp(&0) {
@@ -386,7 +386,7 @@ fn decompile_inner(instructions: &[AstNode]) -> String {
                     Ordering::Greater => "<".repeat(last_offset as usize),
                 };
 
-                result.push_str(&format!("{}]", moves));
+                write!(result, "{}]", moves).unwrap();
             }
         }
     }
@@ -398,7 +398,7 @@ fn decompile_inner(instructions: &[AstNode]) -> String {
 fn parse_increment() {
     assert_eq!(
         parse("+").unwrap(),
-        [Increment {
+        [AstNode::Increment {
             amount: Wrapping(1),
             offset: 0,
             position: Some(Position { start: 0, end: 0 }),
@@ -407,12 +407,12 @@ fn parse_increment() {
     assert_eq!(
         parse("++").unwrap(),
         [
-            Increment {
+            AstNode::Increment {
                 amount: Wrapping(1),
                 offset: 0,
                 position: Some(Position { start: 0, end: 0 }),
             },
-            Increment {
+            AstNode::Increment {
                 amount: Wrapping(1),
                 offset: 0,
                 position: Some(Position { start: 1, end: 1 }),
@@ -425,7 +425,7 @@ fn parse_increment() {
 fn parse_decrement() {
     assert_eq!(
         parse("-").unwrap(),
-        [Increment {
+        [AstNode::Increment {
             amount: Wrapping(-1),
             offset: 0,
             position: Some(Position { start: 0, end: 0 }),
@@ -437,7 +437,7 @@ fn parse_decrement() {
 fn parse_pointer_increment() {
     assert_eq!(
         parse(">").unwrap(),
-        [PointerIncrement {
+        [AstNode::PointerIncrement {
             amount: 1,
             position: Some(Position { start: 0, end: 0 }),
         }]
@@ -448,7 +448,7 @@ fn parse_pointer_increment() {
 fn parse_pointer_decrement() {
     assert_eq!(
         parse("<").unwrap(),
-        [PointerIncrement {
+        [AstNode::PointerIncrement {
             amount: -1,
             position: Some(Position { start: 0, end: 0 }),
         }]
@@ -459,7 +459,7 @@ fn parse_pointer_decrement() {
 fn parse_read() {
     assert_eq!(
         parse(",").unwrap(),
-        [Read {
+        [AstNode::Read {
             position: Some(Position { start: 0, end: 0 })
         }]
     );
@@ -469,7 +469,7 @@ fn parse_read() {
 fn parse_write() {
     assert_eq!(
         parse(".").unwrap(),
-        [Write {
+        [AstNode::Write {
             position: Some(Position { start: 0, end: 0 })
         }]
     );
@@ -477,7 +477,7 @@ fn parse_write() {
 
 #[test]
 fn parse_empty_loop() {
-    let expected = [Loop {
+    let expected = [AstNode::Loop {
         body: vec![],
         position: Some(Position { start: 0, end: 1 }),
     }];
@@ -486,12 +486,12 @@ fn parse_empty_loop() {
 
 #[test]
 fn parse_simple_loop() {
-    let loop_body = vec![Increment {
+    let loop_body = vec![AstNode::Increment {
         amount: Wrapping(1),
         offset: 0,
         position: Some(Position { start: 1, end: 1 }),
     }];
-    let expected = [Loop {
+    let expected = [AstNode::Loop {
         body: loop_body,
         position: Some(Position { start: 0, end: 2 }),
     }];
@@ -501,24 +501,24 @@ fn parse_simple_loop() {
 #[test]
 fn parse_complex_loop() {
     let loop_body = vec![
-        Read {
+        AstNode::Read {
             position: Some(Position { start: 2, end: 2 }),
         },
-        Increment {
+        AstNode::Increment {
             amount: Wrapping(1),
             offset: 0,
             position: Some(Position { start: 3, end: 3 }),
         },
     ];
     let expected = [
-        Write {
+        AstNode::Write {
             position: Some(Position { start: 0, end: 0 }),
         },
-        Loop {
+        AstNode::Loop {
             body: loop_body,
             position: Some(Position { start: 1, end: 4 }),
         },
-        Increment {
+        AstNode::Increment {
             amount: Wrapping(-1),
             offset: 0,
             position: Some(Position { start: 5, end: 5 }),
